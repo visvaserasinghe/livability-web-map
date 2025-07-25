@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sri Lanka Livability Map</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/esri-leaflet-geocoder@3.1.4/dist/esri-leaflet-geocoder.css">
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:wght@700&family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="styles.css">
+    
+
+    </head>
+<body>
+    <div class="map-header">
+        <img src="icon.png" alt="Map Icon" class="header-icon">
+        <div class="header-title">
+            <h2>Sri Lanka Livability Map</h2>
+            <p>An Interactive Guide</p>
+        </div>
+    </div>
+
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        #map { height: 100vh; width: 100vw; }
+    </style>
+</head>
+<body>
+    
+
+    <div id="map"></div>
+    <div id="map"></div>
+    
+    <div class="info-box" id="livability-info">Hover over the map for a score</div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/georaster"></script>
+    <script src="https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/georaster-layer-for-leaflet.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <script src="https://unpkg.com/esri-leaflet@3.0.10/dist/esri-leaflet.js"></script>
+    <script src="https://unpkg.com/esri-leaflet-vector@4.2.3/dist/esri-leaflet-vector.js"></script>
+    <script src="https://unpkg.com/esri-leaflet-geocoder@3.1.4/dist/esri-leaflet-geocoder.js"></script>
+    <script src="https://unpkg.com/leaflet-image@0.4.0/dist/leaflet-image.js"></script>
+
+
+    <script>
+        // --- DEFINE ALL BASEMAP LAYERS ---
+        const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        });
+
+        const esriImagery = L.esri.basemapLayer('Imagery');
+        const esriLabels = L.esri.basemapLayer('ImageryLabels');
+        const esriImageryWithLabels = L.layerGroup([esriImagery, esriLabels]);
+
+        const stadiaAlidade = L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png', {
+            maxZoom: 20,
+            attribution: '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>, &copy; <a href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a href="http://openstreetmap.org">OpenStreetMap</a> contributors'
+        });
+
+        const cartoDBDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20
+        });
+
+        // --- INITIALIZE THE MAP ---
+        // Start with the Stadia "Earth Tone" map as the default
+        const map = L.map('map', {
+            layers: [stadiaAlidade] 
+        }).setView([7.8731, 80.7718], 8);
+        
+
+        // --- LAYER CONTROL (LEGEND) SETUP ---
+        // Add all new basemaps to this object
+        const baseMaps = {
+            "Earth Tone": stadiaAlidade,
+            "Satellite": esriImageryWithLabels,
+            "Dark Mode": cartoDBDark,
+            "Standard": osmLayer
+        };
+        const overlayMaps = {};
+        
+
+        // --- ARCGIS SEARCH BAR ---
+        const arcgisSearch = L.esri.Geocoding.geosearch({
+            position: 'topright',
+            placeholder: 'Search for towns or places',
+            useMapBounds: false,
+            providers: [
+                L.esri.Geocoding.arcgisOnlineProvider({
+                    apikey: 'kdg5Vd7Wq5Ayl2U4' // Paste your Client ID
+                })
+            ]
+        }).addTo(map);
+        
+        const searchResultsLayer = L.layerGroup().addTo(map);
+        arcgisSearch.on('results', function (data) {
+            searchResultsLayer.clearLayers();
+            if (data.results.length > 0) {
+                const result = data.results[0];
+                searchResultsLayer.addLayer(L.marker(result.latlng));
+                map.flyTo(result.latlng, 13); 
+            }
+        });
+        
+
+                // --- LAYER CONTROL (LEGEND) SETUP ---
+        // (Removed duplicate declaration of baseMaps and overlayMaps)
+
+        // --- SETUP FOR USER-DRAWN ITEMS ---
+        const userDrawnItems = new L.FeatureGroup();
+        map.addLayer(userDrawnItems);
+        overlayMaps["My Drawn Items"] = userDrawnItems; // Add this to the overlays object
+
+        // --- STYLES FOR DSD LAYER INTERACTION ---
+        const dsdDefaultStyle = { color: "#ffffff", weight: 1.5, opacity: 0.8, fillOpacity: 0.1, fillColor: "#728C69" };
+        const dsdHighlightStyle = { color: '#D4AF37', weight: 3, opacity: 1, fillOpacity: 0.5, fillColor: '#D4AF37' };
+        let selectedDsdLayer = null; // Variable to track the selected layer
+
+        // --- ASYNCHRONOUSLY LOAD DATA LAYERS ---
+        const livabilityPromise = fetch("livability.tif")
+            .then(response => response.arrayBuffer())
+            .then(arrayBuffer => parseGeoraster(arrayBuffer))
+            .then(georaster => {
+                const livabilityLayer = new GeoRasterLayer({
+                    georaster: georaster, opacity: 0.9, resolution: 1080,
+                    pixelValuesToColorFn: values => {
+                        const score = values[0];
+                        if (score === georaster.noDataValue) return null;
+                        if (score > 4) return '#006837';
+                        if (score > 3) return '#31a354';
+                        if (score > 2) return '#78c679';
+                        if (score > 1) return '#c2e699';
+                        return '#ffffcc';
+                    }
+                });
+                overlayMaps["Livability Score"] = livabilityLayer;
+            }).catch(error => console.error("Error loading GeoTIFF:", error));
+
+        const dsdPromise = fetch("dsd_data.geojson")
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                return response.json();
+            })
+            .then(data => {
+                const dsdLayer = L.geoJson(data, {
+                    style: dsdDefaultStyle, // Apply the default style initially
+                    onEachFeature: function (feature, layer) {
+                        const popupContent = `
+                            <h4>${feature.properties.DSD_N || 'N/A'}</h4>
+                            <p>Population: ${feature.properties.TOT_POP || 'N/A'}</p>
+                            <p>Area: ${feature.properties.Area|| 'N/A'} km²</p>`;
+                        layer.bindPopup(popupContent);
+                         
+                        // --- NEW: Add click event for highlighting ---
+                        layer.on('click', function (e) {
+                            console.log("DSD Polygon clicked."); // Debug log
+                            // Reset the previously selected layer's style if there is one
+                            if (selectedDsdLayer && selectedDsdLayer ===layer) {
+                                console.log("This layer was already selected. Unselecting it."); // Debug log
+                                layer.setStyle(dsdDefaultStyle);
+                                selectedDsdLayer = null;
+                                
+                            } else {
+                                console.log("This is a new selection."); // Debug log
+                                // Reset the previously selected layer's style if there is one
+                                if (selectedDsdLayer) {
+                                selectedDsdLayer.setStyle(dsdDefaultStyle);
+                            }
+                            // Set the new style for the clicked layer and update the tracker
+                            layer.setStyle(dsdHighlightStyle);
+                            selectedDsdLayer = layer;
+                                
+                            }
+                            L.DomEvent.stopPropagation(e);
+                        });
+                    }
+                });
+                overlayMaps["DSD Boundaries"] = dsdLayer;
+            }).catch(error => console.error("Error loading GeoJSON:", error));
+
+        Promise.all([livabilityPromise, dsdPromise]).then(() => {
+            if (overlayMaps["DSD Boundaries"]) { overlayMaps["DSD Boundaries"].addTo(map); }
+            if (overlayMaps["Livability Score"]) { overlayMaps["Livability Score"].addTo(map); }
+            L.control.layers(baseMaps, overlayMaps,{ position: 'topright'}).addTo(map);
+        }).catch(err => {
+            console.error("A layer failed to load, so the map could not be fully initialized.", err);
+        });
+            // ▼▼▼ PASTE THE LEGEND CODE STARTING HERE ▼▼▼
+
+            const legend = L.control({position: 'bottomright'});
+
+            legend.onAdd = function (map) {
+                const div = L.DomUtil.create('div', 'legend');
+
+                div.innerHTML = '<h4>Livability Score</h4>' +
+                                '<div class="legend-gradient"></div>' +
+                                '<div class="legend-labels">' +
+                                    '<span>Low</span>' +
+                                    '<span>High</span>' +
+                                '</div>';
+        
+                return div;
+            };
+        
+
+    legend.addTo(map);
+    
+    // ▲▲▲ END OF LEGEND CODE ▲▲▲
+// --- DRAWING AND POINTING CONTROLS ---
+
+        // 1. Drawing Polygons
+        const drawControl = new L.Control.Draw({
+            draw: {
+                polygon: true,
+                polyline: false,
+                rectangle: false,
+                circle: false,
+                circlemarker: false,
+                marker: false // We will use a custom click handler for markers
+            },
+            edit: {
+                featureGroup: userDrawnItems
+            }
+        });
+        map.addControl(drawControl);
+
+        map.on(L.Draw.Event.CREATED, function (event) {
+            const layer = event.layer;
+            userDrawnItems.addLayer(layer);
+            layer.bindPopup('Drawn Polygon').openPopup();
+        });
+
+        // 2. Pointing Locations on Click
+        map.on('click', function(e) {
+            // This check prevents adding a pin when clicking on a control
+            if (e.originalEvent.target.closest('.leaflet-control-container')) {
+                return;
+            }
+            
+            const marker = L.marker(e.latlng).addTo(userDrawnItems);
+            marker.bindPopup("Pinned Location").openPopup();
+        
+        // --- UPDATED Map Click Handler ---
+        map.on('click', function(e) {
+            // Reset DSD layer style if one was selected
+            if (selectedDsdLayer) {
+               selectedDsdLayer.setStyle(dsdDefaultStyle);
+               selectedDsdLayer = null;
+         }
+
+             // This part for pinning a location remains, but we check if a control was clicked
+            if (e.originalEvent.target.closest('.leaflet-control-container')) return;
+    
+             // Check if the click was on an existing feature (like a DSD polygon)
+             if (e.originalEvent.target.classList.contains('leaflet-interactive')) return;
+
+            L.marker(e.latlng).addTo(userDrawnItems).bindPopup("Pinned Location").openPopup();
+        });
+        });
+        
+
+    </script>
+</body>
+</html>
